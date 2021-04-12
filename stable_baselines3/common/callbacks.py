@@ -5,10 +5,11 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import gym
 import numpy as np
+import rospy
 
 from stable_baselines3.common import base_class, logger  # pytype: disable=pyi-error
 from stable_baselines3.common.evaluation import evaluate_policy
-from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, sync_envs_normalization
+from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv, sync_envs_normalization, VecNormalize
 
 
 class BaseCallback(ABC):
@@ -263,6 +264,7 @@ class EvalCallback(EventCallback):
     Callback for evaluating an agent.
 
     :param eval_env: The environment used for initialization
+    :param train_env: The environment used for saving moving average of VecNormalize 
     :param callback_on_new_best: Callback to trigger
         when there is a new best model according to the ``mean_reward``
     :param n_eval_episodes: The number of episodes to test the agent
@@ -282,6 +284,8 @@ class EvalCallback(EventCallback):
     def __init__(
         self,
         eval_env: Union[gym.Env, VecEnv],
+        train_env: Union[gym.Env, VecEnv],
+        callback_on_eval_end: Optional[BaseCallback] = None,
         callback_on_new_best: Optional[BaseCallback] = None,
         n_eval_episodes: int = 5,
         eval_freq: int = 10000,
@@ -297,9 +301,11 @@ class EvalCallback(EventCallback):
         self.eval_freq = eval_freq
         self.best_mean_reward = -np.inf
         self.last_mean_reward = -np.inf
+        self.last_success_rate = -np.inf
         self.deterministic = deterministic
         self.render = render
         self.warn = warn
+        self.callback_on_eval_end = callback_on_eval_end
 
         # Convert to VecEnv for consistency
         if not isinstance(eval_env, VecEnv):
@@ -309,6 +315,7 @@ class EvalCallback(EventCallback):
             assert eval_env.num_envs == 1, "You must pass only one environment for evaluation"
 
         self.eval_env = eval_env
+        self.train_env = train_env
         self.best_model_save_path = best_model_save_path
         # Logs will be written in ``evaluations.npz``
         if log_path is not None:
@@ -354,6 +361,7 @@ class EvalCallback(EventCallback):
     def _on_step(self) -> bool:
 
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+            new_best = False
             # Sync training and eval env if there is VecNormalize
             sync_envs_normalization(self.training_env, self.eval_env)
 
@@ -406,16 +414,28 @@ class EvalCallback(EventCallback):
                 if self.verbose > 0:
                     print(f"Success rate: {100 * success_rate:.2f}%")
                 self.logger.record("eval/success_rate", success_rate)
+                self.last_success_rate = success_rate
 
             if mean_reward > self.best_mean_reward:
                 if self.verbose > 0:
                     print("New best mean reward!")
                 if self.best_model_save_path is not None:
                     self.model.save(os.path.join(self.best_model_save_path, "best_model"))
+                    if isinstance(self.train_env, VecNormalize):
+                        self.train_env.save(
+                            os.path.join(self.best_model_save_path, "vec_normalize.pkl"))
                 self.best_mean_reward = mean_reward
+                new_best = True
+
+            if self.callback_on_eval_end is not None:
+                    self.callback_on_eval_end._on_step(self)
+
+            if new_best:        
                 # Trigger callback if needed
                 if self.callback is not None:
                     return self._on_event()
+            
+            
 
         return True
 
@@ -448,12 +468,17 @@ class StopTrainingOnRewardThreshold(BaseCallback):
     def _on_step(self) -> bool:
         assert self.parent is not None, "``StopTrainingOnMinimumReward`` callback must be used " "with an ``EvalCallback``"
         # Convert np.bool_ to bool, otherwise callback() is False won't work
-        continue_training = bool(self.parent.best_mean_reward < self.reward_threshold)
+        if rospy.get_param("/task_mode") != "staged":
+            continue_training = bool(self.parent.best_mean_reward < self.reward_threshold)
+        else:
+            continue_training = not bool(
+                self.parent.best_mean_reward >= self.reward_threshold and
+                rospy.get_param("/last_stage_reached"))
         if self.verbose > 0 and not continue_training:
-            print(
-                f"Stopping training because the mean reward {self.parent.best_mean_reward:.2f} "
-                f" is above the threshold {self.reward_threshold}"
-            )
+                print(
+                    f"Stopping training because the mean reward {self.parent.best_mean_reward:.2f} "
+                    f" is above the threshold {self.reward_threshold}"
+                )
         return continue_training
 
 

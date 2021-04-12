@@ -288,3 +288,11 @@ class PPO(OnPolicyAlgorithm):
             eval_log_path=eval_log_path,
             reset_num_timesteps=reset_num_timesteps,
         )
+
+    def update_n_envs(self):
+        assert (
+            self.env is not None
+        ), f"No environment given"
+        if self.env is not None:
+            self.n_envs = self.env.num_envs
+            self.rollout_buffer.n_envs = self.n_envs
