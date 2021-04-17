@@ -456,28 +456,52 @@ class StopTrainingOnRewardThreshold(BaseCallback):
 
     It must be used with the ``EvalCallback``.
 
-    :param reward_threshold:  Minimum expected reward per episode
+    :param threshold_type: Which threshold type to consider for
+        stoppage criteria (rew or succ)
+    :param threshold:  Minimum expected reward per episode
         to stop training.
     :param verbose:
     """
 
-    def __init__(self, reward_threshold: float, verbose: int = 0):
+    def __init__(self, treshhold_type: str="rew", threshold: float=14.5, verbose: int = 0):
         super(StopTrainingOnRewardThreshold, self).__init__(verbose=verbose)
-        self.reward_threshold = reward_threshold
+        self.threshold_type = treshhold_type
+        assert self.threshold_type == "rew" or self.threshold_type == "succ", "Threshold type must be 'rew' or 'succ'!"
+        
+        if self.threshold_type == "rew":
+            assert threshold > 0, "Reward threshold must be positive"
+        else:
+            assert threshold >= 0.0 and threshold <= 1.0, "Success threshold must be within 0 to 1"
+        self.threshold = threshold
+
 
     def _on_step(self) -> bool:
         assert self.parent is not None, "``StopTrainingOnMinimumReward`` callback must be used " "with an ``EvalCallback``"
         # Convert np.bool_ to bool, otherwise callback() is False won't work
         if rospy.get_param("/task_mode") != "staged":
-            continue_training = bool(self.parent.best_mean_reward < self.reward_threshold)
+            if self.threshold_type == "rew":
+                continue_training = bool(self.parent.best_mean_reward < self.threshold)
+            else:
+                continue_training = bool(self.parent.last_success_rate < self.threshold)
         else:
-            continue_training = not bool(
-                self.parent.best_mean_reward >= self.reward_threshold and
-                rospy.get_param("/last_stage_reached"))
+            if self.threshold_type == "rew":
+                continue_training = not bool(
+                    self.parent.best_mean_reward >= self.threshold and
+                    rospy.get_param("/last_stage_reached"))
+            else:
+                continue_training = not bool(
+                    self.parent.last_success_rate >= self.threshold and
+                    rospy.get_param("/last_stage_reached"))
         if self.verbose > 0 and not continue_training:
+            if self.threshold_type == "rew":
                 print(
                     f"Stopping training because the mean reward {self.parent.best_mean_reward:.2f} "
-                    f" is above the threshold {self.reward_threshold}"
+                    f" is above the threshold {self.threshold}"
+                )
+            else:
+                print(
+                    f"Stopping training because the success rate {self.parent.last_success_rate:.2f} "
+                    f" is above the threshold {self.threshold}"
                 )
         return continue_training
 
