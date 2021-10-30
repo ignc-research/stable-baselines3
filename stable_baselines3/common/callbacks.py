@@ -521,6 +521,7 @@ class MarlEvalCallback(EventCallback):
 
     def __init__(
         self,
+        train_env,
         eval_env,
         num_robots: int,
         callback_on_eval_end: Optional[BaseCallback] = None,
@@ -548,6 +549,7 @@ class MarlEvalCallback(EventCallback):
         self.warn = warn
         self.callback_on_eval_end = callback_on_eval_end
 
+        self.train_env = train_env
         self.eval_env = eval_env
         self.best_model_save_path = best_model_save_path
 
@@ -570,6 +572,13 @@ class MarlEvalCallback(EventCallback):
         #         "Training and eval env are not of the same type"
         #         f"{self.training_env} != {self.eval_env}"
         #     )
+        assert (
+            isinstance(self.train_env, VecNormalize)
+            and isinstance(self.eval_env, VecNormalize)
+        ) or (
+            not isinstance(self.train_env, VecNormalize)
+            and not isinstance(self.eval_env, VecNormalize)
+        ), "Both environments have to be of the same type"
 
         # Create folders if needed
         if self.best_model_save_path is not None:
@@ -609,8 +618,7 @@ class MarlEvalCallback(EventCallback):
             new_best = False
 
             # Sync training and eval env if there is VecNormalize
-            # We currently don't support normalization in MARL
-            # sync_envs_normalization(self.training_env, self.eval_env)
+            sync_envs_normalization(self.training_env, self.eval_env)
 
             # Reset success rate buffer
             self._success_rate_buffer = []
@@ -680,6 +688,12 @@ class MarlEvalCallback(EventCallback):
                     self.model.save(
                         os.path.join(self.best_model_save_path, "best_model")
                     )
+                    if isinstance(self.train_env, VecNormalize):
+                        self.train_env.save(
+                            os.path.join(
+                                self.best_model_save_path, "vec_normalize.pkl"
+                            )
+                        )
                 self.best_mean_reward = mean_reward
                 new_best = True
 
