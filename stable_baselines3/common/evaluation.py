@@ -187,7 +187,7 @@ if found_rl_agent:
             assert (
                 env.num_envs == 1
             ), "You must pass only one environment when using this function"
-            is_monitor_wrapped = env.env_is_wrapped(Monitor)[0]
+            # is_monitor_wrapped = env.env_is_wrapped(Monitor)[0]
         # else:
         #     is_monitor_wrapped = is_wrapped(env, Monitor)
 
