@@ -183,11 +183,11 @@ if found_rl_agent:
         # from stable_baselines3.common.env_util import is_wrapped
         # from stable_baselines3.common.monitor import Monitor
 
-        # if isinstance(env, VecEnv):
-        #     assert (
-        #         env.num_envs == 1
-        #     ), "You must pass only one environment when using this function"
-        #     is_monitor_wrapped = env.env_is_wrapped(Monitor)[0]
+        if isinstance(env, VecEnv):
+            assert (
+                env.num_envs == 1
+            ), "You must pass only one environment when using this function"
+            is_monitor_wrapped = env.env_is_wrapped(Monitor)[0]
         # else:
         #     is_monitor_wrapped = is_wrapped(env, Monitor)
 
