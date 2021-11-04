@@ -131,6 +131,7 @@ def evaluate_policy(
 
 
 if found_rl_agent:
+    import gym.vector
 
     def evaluate_marl_policy(
         model: "base_class.BaseAlgorithm",
@@ -183,11 +184,11 @@ if found_rl_agent:
         # from stable_baselines3.common.env_util import is_wrapped
         # from stable_baselines3.common.monitor import Monitor
 
-        if isinstance(env, VecEnv):
-            assert (
-                env.num_envs == 1
-            ), "You must pass only one environment when using this function"
-            # is_monitor_wrapped = env.env_is_wrapped(Monitor)[0]
+        # if isinstance(env, VecEnv):
+        #     assert (
+        #         env.num_envs == 1
+        #     ), "You must pass only one environment when using this function"
+        # is_monitor_wrapped = env.env_is_wrapped(Monitor)[0]
         # else:
         #     is_monitor_wrapped = is_wrapped(env, Monitor)
 
@@ -199,8 +200,11 @@ if found_rl_agent:
         #         UserWarning,
         #     )
 
+        is_vec_env = isinstance(env, (VecEnv, gym.vector.VectorEnv))
+
         episode_rewards, episode_lengths = [], []
         not_reseted = True
+        agents = env.agents if not is_vec_env else get_vecagent_list(env)
 
         while len(episode_rewards) < n_eval_episodes:
             # Number of loops here might differ from true episodes
@@ -221,8 +225,11 @@ if found_rl_agent:
                 []
             )  # temporarily save steps when a robot is done in order to calc mean
 
+            done_agents = []
+
             while done_count != num_robots:
-                agents = env.agents
+                if is_vec_env and type(obs) == np.ndarray:
+                    obs = vecenv_listarray2dict(agents, obs)
 
                 actions = {
                     agent: model.predict(
@@ -230,29 +237,40 @@ if found_rl_agent:
                     )[0]
                     for agent in agents
                 }
+                if is_vec_env:
+                    actions = vecenv_action_dict2array(actions, done_agents)
 
                 obs, rewards, dones, infos = env.step(actions)
+                if is_vec_env:
+                    (
+                        obs,
+                        rewards,
+                        dones,
+                        infos,
+                    ) = vecenv_multiple_listsarrays2dicts(
+                        agents, [obs, rewards, dones, infos]
+                    )
 
-                curr_dones = extract_dones(dones)
+                curr_dones, curr_done_agents = extract_dones_2(
+                    infos, done_agents
+                )
                 done_count += curr_dones  # counts the number of finished robots
+
+                episode_reward += sum_rewards(rewards, done_agents)
 
                 # update counters if a robot finishes
                 if curr_dones > 0:
+                    for agent in curr_done_agents:
+                        done_agents.append(agent)
                     tmp_episode_length += [episode_length] * curr_dones
-                    curr_successes = sum(
-                        reason["done_reason"] == 2
-                        for reason in infos.values()
-                        if "done_reason" in reason
-                    )
+                    curr_successes = extract_successes(infos)
                     assert curr_successes <= curr_dones
                     success_count += curr_successes
 
-                episode_reward += sum_rewards(rewards)
+                episode_length += 1
 
                 if callback is not None:
                     callback(locals(), globals())
-
-                episode_length += 1
 
                 if render:
                     env.render()
@@ -271,7 +289,8 @@ if found_rl_agent:
             episode_rewards.append(episode_reward / num_robots)
             episode_lengths.append(sum(tmp_episode_length) / num_robots)
 
-            obs = env.reset()
+            if not is_vec_env:
+                obs = env.reset()
 
         mean_reward = np.mean(episode_rewards)
         std_reward = np.std(episode_rewards)
@@ -285,9 +304,64 @@ if found_rl_agent:
         return mean_reward, std_reward
 
 
-def extract_dones(dones: Dict[str, bool]) -> int:
-    return sum(dones.values())
+def get_vecagent_list(env):
+    from stable_baselines3.common.vec_env import VecNormalize
+    from supersuit.vector.markov_vector_wrapper import MarkovVectorEnv
+
+    if isinstance(env, VecNormalize):
+        return env.venv.par_env.agents
+    elif isinstance(env, MarkovVectorEnv):
+        return env.par_env.possible_agents
+    else:
+        raise TypeError("Env Type not known")
 
 
-def sum_rewards(rewards: Dict[str, float]) -> float:
-    return sum(rewards.values())
+def vecenv_listarray2dict(agent_list: list, data: np.ndarray) -> dict:
+    assert type(data) is np.ndarray or type(data) is list
+    return {agent: data[i] for i, agent in enumerate(agent_list)}
+
+
+def vecenv_action_dict2array(data: dict, done_agents: list) -> np.ndarray:
+    assert type(data) is dict
+    return np.stack(
+        [
+            data_array if agent not in done_agents else np.array([0.0, 0.0])
+            for agent, data_array in data.items()
+        ]
+    )
+
+
+def vecenv_multiple_listsarrays2dicts(agent_list: list, data: list) -> tuple:
+    return tuple(
+        vecenv_listarray2dict(agent_list, data_type) for data_type in data
+    )
+
+
+def extract_dones(dones: Dict[str, bool]) -> Tuple[int, List[str]]:
+    """Currently not used as SS SB3 VecEnv wrapper doesn't return dones correctly"""
+    return sum(dones.values()), [agent for agent, done in dones.items() if done]
+
+
+def extract_dones_2(
+    infos: Dict[str, Any], done_agents: List[str]
+) -> Tuple[int, List[str]]:
+    done_agents = [
+        agent
+        for agent, info in infos.items()
+        if "done_reason" in info and agent not in done_agents
+    ]
+    return len(done_agents), done_agents
+
+
+def extract_successes(infos: Dict[str, Any]) -> int:
+    return sum(
+        reason["done_reason"] == 2
+        for reason in infos.values()
+        if "done_reason" in reason
+    )
+
+
+def sum_rewards(rewards: Dict[str, float], done_agents: List[str]) -> float:
+    return sum(
+        reward for agent, reward in rewards.items() if agent not in done_agents
+    )

@@ -3,7 +3,11 @@ import typing
 from copy import deepcopy
 from typing import Optional, Type, Union
 
-from stable_baselines3.common.vec_env.base_vec_env import CloudpickleWrapper, VecEnv, VecEnvWrapper
+from stable_baselines3.common.vec_env.base_vec_env import (
+    CloudpickleWrapper,
+    VecEnv,
+    VecEnvWrapper,
+)
 from stable_baselines3.common.vec_env.dummy_vec_env import DummyVecEnv
 from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
 from stable_baselines3.common.vec_env.vec_check_nan import VecCheckNan
@@ -17,7 +21,9 @@ if typing.TYPE_CHECKING:
     from stable_baselines3.common.type_aliases import GymEnv
 
 
-def unwrap_vec_wrapper(env: Union["GymEnv", VecEnv], vec_wrapper_class: Type[VecEnvWrapper]) -> Optional[VecEnvWrapper]:
+def unwrap_vec_wrapper(
+    env: Union["GymEnv", VecEnv], vec_wrapper_class: Type[VecEnvWrapper]
+) -> Optional[VecEnvWrapper]:
     """
     Retrieve a ``VecEnvWrapper`` object by recursively searching.
 
@@ -33,15 +39,21 @@ def unwrap_vec_wrapper(env: Union["GymEnv", VecEnv], vec_wrapper_class: Type[Vec
     return None
 
 
-def unwrap_vec_normalize(env: Union["GymEnv", VecEnv]) -> Optional[VecNormalize]:
+def unwrap_vec_normalize(
+    env: Union["GymEnv", VecEnv]
+) -> Optional[VecNormalize]:
     """
     :param env:
     :return:
     """
-    return unwrap_vec_wrapper(env, VecNormalize)  # pytype:disable=bad-return-type
+    return unwrap_vec_wrapper(
+        env, VecNormalize
+    )  # pytype:disable=bad-return-type
 
 
-def is_vecenv_wrapped(env: Union["GymEnv", VecEnv], vec_wrapper_class: Type[VecEnvWrapper]) -> bool:
+def is_vecenv_wrapped(
+    env: Union["GymEnv", VecEnv], vec_wrapper_class: Type[VecEnvWrapper]
+) -> bool:
     """
     Check if an environment is already wrapped by a given ``VecEnvWrapper``.
 
@@ -66,4 +78,7 @@ def sync_envs_normalization(env: "GymEnv", eval_env: "GymEnv") -> None:
             eval_env_tmp.obs_rms = deepcopy(env_tmp.obs_rms)
             eval_env_tmp.ret_rms = deepcopy(env_tmp.ret_rms)
         env_tmp = env_tmp.venv
-        eval_env_tmp = eval_env_tmp.venv
+        try:
+            eval_env_tmp = eval_env_tmp.venv
+        except AttributeError:
+            break
