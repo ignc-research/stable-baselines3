@@ -204,7 +204,9 @@ if found_rl_agent:
 
         episode_rewards, episode_lengths = [], []
         not_reseted = True
-        agents = env.agents if not is_vec_env else get_vecagent_list(env)
+        agents = (
+            env.possible_agents if not is_vec_env else get_vecagent_list(env)
+        )
 
         while len(episode_rewards) < n_eval_episodes:
             # Number of loops here might differ from true episodes
