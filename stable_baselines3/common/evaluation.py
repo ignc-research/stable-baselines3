@@ -309,7 +309,7 @@ def get_vecagent_list(env):
     from supersuit.vector.markov_vector_wrapper import MarkovVectorEnv
 
     if isinstance(env, VecNormalize):
-        return env.venv.par_env.agents
+        return env.venv.par_env.possible_agents
     elif isinstance(env, MarkovVectorEnv):
         return env.par_env.possible_agents
     else:
