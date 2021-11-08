@@ -229,7 +229,7 @@ if found_rl_agent:
 
             done_agents = []
 
-            while done_count != num_robots:
+            while len(done_agents) < num_robots:
                 if is_vec_env and type(obs) == np.ndarray:
                     obs = vecenv_listarray2dict(agents, obs)
 
@@ -341,6 +341,7 @@ def vecenv_multiple_listsarrays2dicts(agent_list: list, data: list) -> tuple:
 
 def extract_dones(dones: Dict[str, bool]) -> Tuple[int, List[str]]:
     """Currently not used as SS SB3 VecEnv wrapper doesn't return dones correctly"""
+
     return sum(dones.values()), [agent for agent, done in dones.items() if done]
 
 
