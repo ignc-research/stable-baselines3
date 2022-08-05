@@ -7,14 +7,19 @@ import gym
 import numpy as np
 import rospy
 
+# import importlib
+# arena_marl = importlib.import_module("arena-marl")
+
+
 from stable_baselines3.common import (
     base_class,
     logger,
 )  # pytype: disable=pyi-error
-from stable_baselines3.common.evaluation import (
-    evaluate_policy,
-    evaluate_marl_policy,
-)
+
+# from stable_baselines3.common.evaluation import (
+#     evaluate_policy,
+#     evaluate_marl_policy,
+# )
 from stable_baselines3.common.vec_env import (
     DummyVecEnv,
     VecEnv,
@@ -39,7 +44,7 @@ class BaseCallback(ABC):
         # Number of time the callback was called
         self.n_calls = 0  # type: int
         # n_envs * n times env.step() was called
-        self.num_timesteps = 0  # type: int
+        self.num_timesteps = {}  # type: int
         self.verbose = verbose
         self.locals: Dict[str, Any] = {}
         self.globals: Dict[str, Any] = {}
@@ -97,7 +102,9 @@ class BaseCallback(ABC):
         """
         self.n_calls += 1
         # timesteps start at zero
-        self.num_timesteps = self.model.num_timesteps
+        self.num_timesteps = {
+            robot: self.robots[robot]["model"].num_timesteps for robot in self.robots
+        }
 
         return self._on_step()
 
@@ -140,9 +147,7 @@ class EventCallback(BaseCallback):
     :param verbose:
     """
 
-    def __init__(
-        self, callback: Optional[BaseCallback] = None, verbose: int = 0
-    ):
+    def __init__(self, callback: Optional[BaseCallback] = None, verbose: int = 0):
         super(EventCallback, self).__init__(verbose=verbose)
         self.callback = callback
         # Give access to the parent
@@ -323,9 +328,11 @@ class EvalCallback(EventCallback):
         verbose: int = 1,
         warn: bool = True,
     ):
-        super(EvalCallback, self).__init__(
-            callback_on_new_best, verbose=verbose
-        )
+
+        # avoid circular import
+        from testing.scripts.evaluation import evaluate_policy
+
+        super(EvalCallback, self).__init__(callback_on_new_best, verbose=verbose)
         self.n_eval_episodes = n_eval_episodes
         self.eval_freq = eval_freq
         self.best_mean_reward = -np.inf
@@ -434,9 +441,7 @@ class EvalCallback(EventCallback):
                     **kwargs,
                 )
 
-            mean_reward, std_reward = np.mean(episode_rewards), np.std(
-                episode_rewards
-            )
+            mean_reward, std_reward = np.mean(episode_rewards), np.std(episode_rewards)
             mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(
                 episode_lengths
             )
@@ -447,9 +452,7 @@ class EvalCallback(EventCallback):
                     f"Eval num_timesteps={self.num_timesteps}, "
                     f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}"
                 )
-                print(
-                    f"Episode length: {mean_ep_length:.2f} +/- {std_ep_length:.2f}"
-                )
+                print(f"Episode length: {mean_ep_length:.2f} +/- {std_ep_length:.2f}")
             # Add to current Logger
             self.logger.record("eval/mean_reward", float(mean_reward))
             self.logger.record("eval/mean_ep_length", mean_ep_length)
@@ -470,9 +473,7 @@ class EvalCallback(EventCallback):
                     )
                     if isinstance(self.train_env, VecNormalize):
                         self.train_env.save(
-                            os.path.join(
-                                self.best_model_save_path, "vec_normalize.pkl"
-                            )
+                            os.path.join(self.best_model_save_path, "vec_normalize.pkl")
                         )
                 self.best_mean_reward = mean_reward
                 new_best = True
@@ -521,49 +522,62 @@ class MarlEvalCallback(EventCallback):
 
     def __init__(
         self,
-        train_env,
-        eval_env,
-        num_robots: int,
+        robots: Dict[str, Dict[str, Any]],
         callback_on_eval_end: Optional[BaseCallback] = None,
         callback_on_new_best: Optional[BaseCallback] = None,
         n_eval_episodes: int = 5,
         eval_freq: int = 10000,
-        log_path: str = None,
-        best_model_save_path: str = None,
+        log_paths: Dict[str, str] = None,
+        best_model_save_paths: Dict[str, str] = None,
         deterministic: bool = True,
         render: bool = False,
         verbose: int = 1,
         warn: bool = True,
     ):
-        super(MarlEvalCallback, self).__init__(
-            callback_on_new_best, verbose=verbose
+        # Avoid circular import
+        from testing.scripts.evaluation import evaluate_policy
+
+        self.evaluate_policy = evaluate_policy
+
+        super(MarlEvalCallback, self).__init__(callback_on_new_best, verbose=verbose)
+
+        self.robots = robots
+        self.agents = {
+            robot: robots[robot]["agent_dict"]["eval_sim"] for robot in robots
+        }
+        self.agent_names = {
+            robot: [a_name._robot_sim_ns for a_name in self.agents[robot]]
+            for robot in robots
+        }
+        self.num_robots = np.sum(
+            [robots[robot]["robot_train_params"]["num_robots"] for robot in robots]
         )
-        self.num_robots = num_robots
         self.n_eval_episodes = n_eval_episodes
         self.eval_freq = eval_freq
-        self.best_mean_reward = -np.inf
-        self.last_mean_reward = -np.inf
-        self.last_success_rate = -np.inf
+        self.best_mean_rewards = {robot: -np.inf for robot in robots}
+        self.last_mean_rewards = {robot: -np.inf for robot in robots}
+        self.last_success_rates = {robot: -np.inf for robot in robots}
         self.deterministic = deterministic
         self.render = render
         self.warn = warn
         self.callback_on_eval_end = callback_on_eval_end
 
-        self.train_env = train_env
-        self.eval_env = eval_env
-        self.best_model_save_path = best_model_save_path
+        self.eval_envs = {robot: robots[robot]["env"] for robot in robots}
+        self.best_model_save_paths = best_model_save_paths
 
         # Logs will be written in ``evaluations.npz``
-        if log_path is not None:
-            log_path = os.path.join(log_path, "evaluations")
+        if log_paths is not None:
+            for robot in robots:
+                if log_paths[robot] is not None:
+                    log_paths[robot] = os.path.join(log_paths[robot], "evaluations")
 
-        self.log_path = log_path
-        self.evaluations_results = []
-        self.evaluations_timesteps = []
-        self.evaluations_length = []
+        self.log_paths = log_paths
+        self.evaluations_results = {robot: [] for robot in self.robots}
+        self.evaluations_timesteps = {robot: [] for robot in self.robots}
+        self.evaluations_lengths = []
         # For computing success rate
-        self._success_rate_buffer = []
-        self.evaluations_successes = []
+        self._success_rate_buffer = {}
+        self.evaluations_successes = {}
 
     def _init_callback(self) -> None:
         # Does not work in some corner cases, where the wrapper is not the same
@@ -572,19 +586,25 @@ class MarlEvalCallback(EventCallback):
         #         "Training and eval env are not of the same type"
         #         f"{self.training_env} != {self.eval_env}"
         #     )
-        assert (
-            isinstance(self.train_env, VecNormalize)
-            and isinstance(self.eval_env, VecNormalize)
-        ) or (
-            not isinstance(self.train_env, VecNormalize)
-            and not isinstance(self.eval_env, VecNormalize)
-        ), "Both environments have to be of the same type"
+        # assert (
+        #     isinstance(self.train_env, VecNormalize)
+        #     and isinstance(self.eval_env, VecNormalize)
+        # ) or (
+        #     not isinstance(self.train_env, VecNormalize)
+        #     and not isinstance(self.eval_env, VecNormalize)
+        # ), "Both environments have to be of the same type"
+
+        if rospy.get_param("/debug_mode"):
+            return
 
         # Create folders if needed
-        if self.best_model_save_path is not None:
-            os.makedirs(self.best_model_save_path, exist_ok=True)
-        if self.log_path is not None:
-            os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
+        for path in self.best_model_save_paths.values():
+            if path is not None:
+                os.makedirs(path, exist_ok=True)
+
+        for path in self.log_paths.values():
+            if path is not None:
+                os.makedirs(path, exist_ok=True)
 
     def _log_success_callback(
         self, locals_: Dict[str, Any], globals_: Dict[str, Any]
@@ -602,107 +622,154 @@ class MarlEvalCallback(EventCallback):
         #     info = infos[0]
 
         # if sum(locals_["dones"].values()):
-        #     success_counter = sum(
-        #         1 for _, info in infos.items() if info["is_success"]
-        #     )
+        #     success_counter = sum(1 for _, info in infos.items() if info["is_success"])
         #     self._success_rate_buffer.append(success_counter / self.num_robots)
 
-        if locals_["done_count"] == self.num_robots:
-            self._success_rate_buffer.append(
-                locals_["success_count"] / self.num_robots
-            )
+        # done_count = np.sum(np.asarray(locals_["done_count"].values()))
+        done_count = np.sum([count for count in locals_["done_count"].values()])
+
+        if done_count == self.num_robots:
+            for robot in self.robots:
+                self._success_rate_buffer[robot].append(
+                    locals_["success_count"][robot] / len(self.agent_names[robot])
+                )
 
     def _on_step(self) -> bool:
 
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
-            new_best = False
+            new_bests = {robot: False for robot in self.robots}
 
             # Sync training and eval env if there is VecNormalize
-            sync_envs_normalization(self.training_env, self.eval_env)
+            # sync_envs_normalization(self.training_env, self.eval_env)
 
             # Reset success rate buffer
-            self._success_rate_buffer = []
+            self._success_rate_buffer = {robot: [] for robot in self.robots}
 
-            episode_rewards, episode_lengths = evaluate_marl_policy(
-                self.model,
-                self.eval_env,
-                self.num_robots,
+            episode_rewards_dict, episode_lengths = self.evaluate_policy(
+                self.robots,
                 n_eval_episodes=self.n_eval_episodes,
-                render=self.render,
                 deterministic=self.deterministic,
+                render=self.render,
                 return_episode_rewards=True,
-                warn=self.warn,
                 callback=self._log_success_callback,
             )
 
-            if self.log_path is not None:
-                self.evaluations_timesteps.append(self.num_timesteps)
-                self.evaluations_results.append(episode_rewards)
-                self.evaluations_length.append(episode_lengths)
+            # If there is even one log path missing, do not log anything
+            if not any([True for path in self.log_paths.values() if path is None]):
+                for robot in self.robots:
+                    self.evaluations_timesteps[robot].append(self.num_timesteps[robot])
+                    self.evaluations_results[robot].append(episode_rewards_dict[robot])
+
+                self.evaluations_lengths.append(episode_lengths)
 
                 kwargs = {}
-                # Save success log if present
-                if self._success_rate_buffer:
-                    self.evaluations_successes.append(self._success_rate_buffer)
-                    kwargs = dict(success_rates=self.evaluations_successes)
+                for robot in self.robots:
+                    # Save success log if present
+                    if self._success_rate_buffer:
+                        self.evaluations_successes[robot].append(
+                            self._success_rate_buffer[robot]
+                        )
+                        kwargs = dict(success_rates=self.evaluations_successes[robot])
 
-                np.savez(
-                    self.log_path,
-                    timesteps=self.evaluations_timesteps,
-                    results=self.evaluations_results,
-                    ep_lengths=self.evaluations_length,
-                    **kwargs,
+                    np.savez(
+                        self.log_paths[robot],
+                        timesteps=self.evaluations_timesteps,
+                        results=self.evaluations_results,
+                        ep_lengths=self.evaluations_length,
+                        **kwargs,
+                    )
+
+            ### Calculate average rewards
+            # {robot: 'mean reward over all agents and all episodes'}
+            mean_rewards = {
+                robot: np.mean(
+                    [
+                        episode_rewards_dict[robot][agent]
+                        for agent in self.agent_names[robot]
+                    ]
                 )
+                for robot in self.robots
+            }
 
-            mean_reward, std_reward = np.mean(episode_rewards), np.std(
-                episode_rewards
-            )
+            ### Calculate standard deviation of rewards
+            # {robot: 'std of rewards over all agents and all episodes'}
+            std_rewards = {
+                robot: np.std(
+                    [
+                        episode_rewards_dict[robot][agent]
+                        for agent in self.agent_names[robot]
+                    ]
+                )
+                for robot in self.robots
+            }
+
             mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(
                 episode_lengths
             )
-            self.last_mean_reward = mean_reward
+
+            for robot in self.robots:
+                self.last_mean_rewards[robot] = mean_rewards[robot]
 
             if self.verbose > 0:
-                print(
-                    f"Eval num_timesteps={self.num_timesteps}, "
-                    f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}"
-                )
-                print(
-                    f"Episode length: {mean_ep_length:.2f} +/- {std_ep_length:.2f}"
-                )
+                print("------------------- Eval results -------------------")
+                for robot in self.robots:
+                    print(f"{robot}: ")
+                    print(f"\t Eval num_timesteps = {self.num_timesteps[robot]}")
+                    print(
+                        f"\t Episode_reward = {mean_rewards[robot]:.2f} +/- {std_rewards[robot]:.2f}"
+                    )
+                print(f"Episode length: {mean_ep_length:.2f} +/- {std_ep_length:.2f}")
             # Add to current Logger
-            self.logger.record("eval/mean_reward", float(mean_reward))
-            self.logger.record("eval/mean_ep_length", mean_ep_length)
+            if self.logger is not None:
+                for robot in self.robots:
+                    self.logger.record(
+                        f"eval/{robot}/mean_reward", float(mean_rewards[robot])
+                    )
+                    self.logger.record("eval/mean_ep_length", mean_ep_length)
 
             if self._success_rate_buffer:
-                success_rate = np.mean(self._success_rate_buffer)
                 if self.verbose > 0:
-                    print(f"Success rate: {100 * success_rate:.2f}%")
-                self.logger.record("eval/success_rate", success_rate)
-                self.last_success_rate = success_rate
+                    print("\n---- Success rates ----\n")
+                for robot in self.robots:
+                    success_rate = np.mean(self._success_rate_buffer[robot])
+                    if self.verbose > 0:
+                        print(f"{robot}:\t{100 * success_rate:.2f}%")
 
-            if mean_reward > self.best_mean_reward:
-                if self.verbose > 0:
-                    print("New best mean reward!")
-                if self.best_model_save_path is not None:
-                    self.model.save(
-                        os.path.join(self.best_model_save_path, "best_model")
-                    )
-                    if isinstance(self.train_env, VecNormalize):
-                        self.train_env.save(
+                    if self.logger is not None:
+                        self.logger.record(f"eval/{robot}/success_rate", success_rate)
+                    self.last_success_rates[robot] = success_rate
+            if self.verbose > 0:
+                print("----------------------------------------------------")
+
+            ### Save the best model for each robot
+            #   if the new mean reward is better than the old one
+            for robot in self.robots:
+                if mean_rewards[robot] > self.best_mean_rewards[robot]:
+                    if self.verbose > 0:
+                        print(f"New best mean reward for {robot}!")
+                    # If there is a path to save the model and we are not in debug mode
+                    if self.best_model_save_paths[
+                        robot
+                    ] is not None and not rospy.get_param("debug_mode", False):
+                        model = self.robots[robot]["model"]
+                        model.save(
                             os.path.join(
-                                self.best_model_save_path, "vec_normalize.pkl"
+                                self.best_model_save_paths[robot], "best_model"
                             )
                         )
-                self.best_mean_reward = mean_reward
-                new_best = True
 
-            if self.callback_on_eval_end is not None:
-                self.callback_on_eval_end._on_step(self)
+                    self.best_mean_rewards[robot] = mean_rewards[robot]
+                    new_bests[robot] = True
 
-            if new_best and self.callback is not None:
-                return self._on_event()
+        if self.callback_on_eval_end is not None:
+            return self.callback_on_eval_end._on_step(self)
 
+        if all(np.asarray(new_bests.values())) and self.callback is not None:
+            return self._on_event()
+
+        return True
+
+    def _on_rollout_end(self) -> bool:
         return True
 
     def update_child_locals(self, locals_: Dict[str, Any]) -> None:
@@ -757,41 +824,61 @@ class StopTrainingOnRewardThreshold(BaseCallback):
         # Convert np.bool_ to bool, otherwise callback() is False won't work
         if rospy.get_param("/task_mode") != "staged":
             if self.threshold_type == "rew":
-                continue_training = bool(
-                    self.parent.best_mean_reward < self.threshold
+                continue_training = all(
+                    np.asarray([rew for rew in self.parent.best_mean_rewards.values()])
+                    < self.threshold
                 )
             else:
-                continue_training = bool(
-                    self.parent.last_success_rate < self.threshold
+                continue_training = all(
+                    np.asarray([sr for sr in self.parent.last_success_rates.values()])
+                    < self.threshold
                 )
         else:
             if self.threshold_type == "rew":
                 continue_training = not bool(
-                    self.parent.best_mean_reward >= self.threshold
+                    all(
+                        np.asarray(
+                            [rew for rew in self.parent.best_mean_rewards.values()]
+                        )
+                        >= self.threshold
+                    )
                     and rospy.get_param("/last_stage_reached")
                 )
             else:
                 continue_training = not bool(
-                    self.parent.last_success_rate >= self.threshold
+                    all(
+                        np.asarray(
+                            [sr for sr in self.parent.last_success_rates.values()]
+                        )
+                        >= self.threshold
+                    )
                     and rospy.get_param("/last_stage_reached")
                 )
         if self.verbose > 0 and not continue_training:
             if self.threshold_type == "rew":
                 print(
-                    f"Stopping training because the mean reward {self.parent.best_mean_reward:.2f} "
-                    f" is above the threshold {self.threshold}"
+                    f"Stopping training because all mean rewards are above the threshold"
                 )
+                for robot in self.parent.best_mean_rewards:
+                    print(f"{robot}:")
+                    print(
+                        f"\t{self.parent.best_mean_rewards[robot]} > {self.threshold}"
+                    )
             else:
                 print(
-                    f"Stopping training because the success rate {self.parent.last_success_rate:.2f} "
-                    f" is above the threshold {self.threshold}"
+                    f"Stopping training because all success rates are above the threshold"
                 )
+                for robot in self.parent.last_success_rates:
+                    print(f"{robot}:")
+                    print(
+                        f"\t{self.parent.last_success_rates[robot]} > {self.threshold}"
+                    )
         return continue_training
 
 
 class EveryNTimesteps(EventCallback):
     """
-    Trigger a callback every ``n_steps`` timesteps
+    Trigger a callback every ``n_steps`` timesteps
 
     :param n_steps: Number of timesteps between two trigger.
     :param callback: Callback that will be called
@@ -829,9 +916,7 @@ class StopTrainingOnMaxEpisodes(BaseCallback):
 
     def _init_callback(self) -> None:
         # At start set total max according to number of envirnments
-        self._total_max_episodes = (
-            self.max_episodes * self.training_env.num_envs
-        )
+        self._total_max_episodes = self.max_episodes * self.training_env.num_envs
 
     def _on_step(self) -> bool:
         # Checking for both 'done' and 'dones' keywords because:
