@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Union
 
 import gym
 import numpy as np
+from rl_utils.rl_utils.utils.wandb_helper import WandbLogger
 import rospy
 
 # import importlib
@@ -523,6 +524,7 @@ class MarlEvalCallback(EventCallback):
     def __init__(
         self,
         robots: Dict[str, Dict[str, Any]],
+        wandb_logger: WandbLogger = None,
         callback_on_eval_end: Optional[BaseCallback] = None,
         callback_on_new_best: Optional[BaseCallback] = None,
         n_eval_episodes: int = 5,
@@ -538,6 +540,7 @@ class MarlEvalCallback(EventCallback):
         from testing.scripts.evaluation import evaluate_policy
 
         self.evaluate_policy = evaluate_policy
+        self.wandb_logger = wandb_logger
 
         super(MarlEvalCallback, self).__init__(callback_on_new_best, verbose=verbose)
 
@@ -691,6 +694,11 @@ class MarlEvalCallback(EventCallback):
                 for robot in self.robots
             }
 
+            if self.wandb_logger is not None:
+                self.wandb_logger.log(
+                    "mean_rewards", mean_rewards, step=(self.n_calls / self.eval_freq)
+                )
+
             ### Calculate standard deviation of rewards
             # {robot: 'std of rewards over all agents and all episodes'}
             std_rewards = {
@@ -706,6 +714,13 @@ class MarlEvalCallback(EventCallback):
             mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(
                 episode_lengths
             )
+
+            if self.wandb_logger is not None:
+                self.wandb_logger.log_single(
+                    "mean_ep_length",
+                    mean_ep_length,
+                    step=(self.n_calls / self.eval_freq),
+                )
 
             for robot in self.robots:
                 self.last_mean_rewards[robot] = mean_rewards[robot]
@@ -737,7 +752,18 @@ class MarlEvalCallback(EventCallback):
 
                     if self.logger is not None:
                         self.logger.record(f"eval/{robot}/success_rate", success_rate)
+
                     self.last_success_rates[robot] = success_rate
+
+                if self.wandb_logger is not None:
+                    sr_dict = {
+                        robot: np.mean(self._success_rate_buffer[robot])
+                        for robot in self.robots
+                    }
+                    self.wandb_logger.log(
+                        "success_rate", sr_dict, step=(self.n_calls / self.eval_freq)
+                    )
+
             if self.verbose > 0:
                 print("----------------------------------------------------")
 
