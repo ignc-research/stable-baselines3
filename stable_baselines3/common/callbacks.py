@@ -560,6 +560,7 @@ class MarlEvalCallback(EventCallback):
         self.best_mean_rewards = {robot: -np.inf for robot in robots}
         self.last_mean_rewards = {robot: -np.inf for robot in robots}
         self.last_success_rates = {robot: -np.inf for robot in robots}
+        self.new_bests = {robot: False for robot in robots}
         self.deterministic = deterministic
         self.render = render
         self.warn = warn
@@ -640,7 +641,6 @@ class MarlEvalCallback(EventCallback):
     def _on_step(self) -> bool:
 
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
-            new_bests = {robot: False for robot in self.robots}
 
             # Sync training and eval env if there is VecNormalize
             # sync_envs_normalization(self.training_env, self.eval_env)
@@ -785,12 +785,14 @@ class MarlEvalCallback(EventCallback):
                         )
 
                     self.best_mean_rewards[robot] = mean_rewards[robot]
-                    new_bests[robot] = True
+                    self.new_bests[robot] = True
 
-        if self.callback_on_eval_end is not None:
-            return self.callback_on_eval_end._on_step(self)
+            if self.callback_on_eval_end is not None:
+                return self.callback_on_eval_end._on_step(self)
 
-        if all(np.asarray(new_bests.values())) and self.callback is not None:
+        new_bests_list = [self.new_bests[robot] for robot in self.robots]
+
+        if all(new_bests_list) and self.callback is not None:
             return self._on_event()
 
         return True
