@@ -696,7 +696,9 @@ class MarlEvalCallback(EventCallback):
 
             if self.wandb_logger is not None:
                 self.wandb_logger.log(
-                    "mean_rewards", mean_rewards, step=(self.n_calls / self.eval_freq)
+                    "eval/mean_rewards",
+                    mean_rewards,
+                    step=(self.n_calls / self.eval_freq),
                 )
 
             ### Calculate standard deviation of rewards
@@ -717,7 +719,7 @@ class MarlEvalCallback(EventCallback):
 
             if self.wandb_logger is not None:
                 self.wandb_logger.log_single(
-                    "mean_ep_length",
+                    "eval/mean_ep_length",
                     mean_ep_length,
                     step=(self.n_calls / self.eval_freq),
                 )
@@ -761,7 +763,9 @@ class MarlEvalCallback(EventCallback):
                         for robot in self.robots
                     }
                     self.wandb_logger.log(
-                        "success_rate", sr_dict, step=(self.n_calls / self.eval_freq)
+                        "eval/success_rate",
+                        sr_dict,
+                        step=(self.n_calls / self.eval_freq),
                     )
 
             if self.verbose > 0:
@@ -793,6 +797,8 @@ class MarlEvalCallback(EventCallback):
         new_bests_list = [self.new_bests[robot] for robot in self.robots]
 
         if all(new_bests_list) and self.callback is not None:
+            for robot in self.robots:
+                self.new_bests[robot] = False
             return self._on_event()
 
         return True
@@ -828,9 +834,11 @@ class StopTrainingOnRewardThreshold(BaseCallback):
         self,
         treshhold_type: str = "rew",
         threshold: float = 14.5,
+        robots: Dict[str, Dict[str, Any]] = None,
         verbose: int = 0,
     ):
         super(StopTrainingOnRewardThreshold, self).__init__(verbose=verbose)
+        self.robots = robots
         self.threshold_type = treshhold_type
         assert (
             self.threshold_type == "rew" or self.threshold_type == "succ"

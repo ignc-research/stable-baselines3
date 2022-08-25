@@ -86,6 +86,7 @@ class PPO(OnPolicyAlgorithm):
         tensorboard_log: Optional[str] = None,
         create_eval_env: bool = False,
         policy_kwargs: Optional[Dict[str, Any]] = None,
+        wandb_logger=None,
         verbose: int = 0,
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
@@ -141,6 +142,7 @@ class PPO(OnPolicyAlgorithm):
         self.clip_range = clip_range
         self.clip_range_vf = clip_range_vf
         self.target_kl = target_kl
+        self.wandb_logger = wandb_logger
 
         if _init_setup_model:
             self._setup_model()
@@ -159,7 +161,7 @@ class PPO(OnPolicyAlgorithm):
 
             self.clip_range_vf = get_schedule_fn(self.clip_range_vf)
 
-    def train(self) -> None:
+    def train(self, agent) -> None:
         """
         Update policy using the currently gathered rollout buffer.
         """
@@ -289,6 +291,42 @@ class PPO(OnPolicyAlgorithm):
             logger.record("train/clip_range_vf", clip_range_vf)
 
         logger.dump(step=self.num_timesteps)
+
+        if self.wandb_logger is not None:
+            step = self.num_timesteps / self.n_epochs
+            self.wandb_logger.log(
+                "train/entropy_loss", {agent: np.mean(entropy_losses)}, step=step
+            )
+            self.wandb_logger.log(
+                "train/policy_gradient_loss", {agent: np.mean(pg_losses)}, step=step
+            )
+            self.wandb_logger.log(
+                "train/value_loss", {agent: np.mean(value_losses)}, step=step
+            )
+            self.wandb_logger.log(
+                "train/approx_kl", {agent: np.mean(approx_kl_divs)}, step=step
+            )
+            self.wandb_logger.log(
+                "train/clip_fraction", {agent: np.mean(clip_fractions)}, step=step
+            )
+            self.wandb_logger.log("loss", {agent: loss.item()}, step=step)
+            self.wandb_logger.log(
+                "train/explained_variance", {agent: explained_var}, step=step
+            )
+            if hasattr(self.policy, "log_std"):
+                self.wandb_logger.log(
+                    "train/std",
+                    {agent: th.exp(self.policy.log_std).mean().item()},
+                    step=step,
+                )
+            self.wandb_logger.log(
+                "train/n_updates", {agent: self._n_updates}, step=step
+            )
+            self.wandb_logger.log("train/clip_range", {agent: clip_range}, step=step)
+            if self.clip_range_vf is not None:
+                self.wandb_logger.log(
+                    "train/clip_range_vf", {agent: clip_range_vf}, step=step
+                )
 
     def learn(
         self,
