@@ -12,13 +12,26 @@ import numpy as np
 import torch as th
 
 from stable_baselines3.common import logger, utils
-from stable_baselines3.common.callbacks import BaseCallback, CallbackList, ConvertCallback, EvalCallback
+from stable_baselines3.common.callbacks import (
+    BaseCallback,
+    CallbackList,
+    ConvertCallback,
+    EvalCallback,
+)
 from stable_baselines3.common.env_util import is_wrapped
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.noise import ActionNoise
 from stable_baselines3.common.policies import BasePolicy, get_policy_from_name
-from stable_baselines3.common.preprocessing import is_image_space, is_image_space_channels_first
-from stable_baselines3.common.save_util import load_from_zip_file, recursive_getattr, recursive_setattr, save_to_zip_file
+from stable_baselines3.common.preprocessing import (
+    is_image_space,
+    is_image_space_channels_first,
+)
+from stable_baselines3.common.save_util import (
+    load_from_zip_file,
+    recursive_getattr,
+    recursive_setattr,
+    save_to_zip_file,
+)
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
 from stable_baselines3.common.utils import (
     check_for_correct_spaces,
@@ -168,14 +181,19 @@ class BaseAlgorithm(ABC):
 
             if not support_multi_env and self.n_envs > 1:
                 raise ValueError(
-                    "Error: the model does not support multiple envs; it requires " "a single vectorized environment."
+                    "Error: the model does not support multiple envs; it requires "
+                    "a single vectorized environment."
                 )
 
             if self.use_sde and not isinstance(self.action_space, gym.spaces.Box):
-                raise ValueError("generalized State-Dependent Exploration (gSDE) can only be used with continuous actions.")
+                raise ValueError(
+                    "generalized State-Dependent Exploration (gSDE) can only be used with continuous actions."
+                )
 
     @staticmethod
-    def _wrap_env(env: GymEnv, verbose: int = 0, monitor_wrapper: bool = True) -> VecEnv:
+    def _wrap_env(
+        env: GymEnv, verbose: int = 0, monitor_wrapper: bool = True
+    ) -> VecEnv:
         """ "
         Wrap environment with the appropriate wrappers if needed.
         For instance, to have a vectorized environment
@@ -233,16 +251,22 @@ class BaseAlgorithm(ABC):
         """Transform to callable if needed."""
         self.lr_schedule = get_schedule_fn(self.learning_rate)
 
-    def _update_current_progress_remaining(self, num_timesteps: int, total_timesteps: int) -> None:
+    def _update_current_progress_remaining(
+        self, num_timesteps: int, total_timesteps: int
+    ) -> None:
         """
         Compute current progress remaining (starts from 1 and ends to 0)
 
         :param num_timesteps: current number of timesteps
         :param total_timesteps:
         """
-        self._current_progress_remaining = 1.0 - float(num_timesteps) / float(total_timesteps)
+        self._current_progress_remaining = 1.0 - float(num_timesteps) / float(
+            total_timesteps
+        )
 
-    def _update_learning_rate(self, optimizers: Union[List[th.optim.Optimizer], th.optim.Optimizer]) -> None:
+    def _update_learning_rate(
+        self, optimizers: Union[List[th.optim.Optimizer], th.optim.Optimizer]
+    ) -> None:
         """
         Update the optimizers learning rate using the current learning rate schedule
         and the current progress remaining (from 1 to 0).
@@ -251,12 +275,16 @@ class BaseAlgorithm(ABC):
             An optimizer or a list of optimizers.
         """
         # Log the current learning rate
-        logger.record("train/learning_rate", self.lr_schedule(self._current_progress_remaining))
+        logger.record(
+            "train/learning_rate", self.lr_schedule(self._current_progress_remaining)
+        )
 
         if not isinstance(optimizers, list):
             optimizers = [optimizers]
         for optimizer in optimizers:
-            update_learning_rate(optimizer, self.lr_schedule(self._current_progress_remaining))
+            update_learning_rate(
+                optimizer, self.lr_schedule(self._current_progress_remaining)
+            )
 
     def _excluded_save_params(self) -> List[str]:
         """
@@ -388,14 +416,20 @@ class BaseAlgorithm(ABC):
         eval_env = self._get_eval_env(eval_env)
 
         # Configure logger's outputs
-        utils.configure_logger(self.verbose, self.tensorboard_log, tb_log_name, reset_num_timesteps)
+        utils.configure_logger(
+            self.verbose, self.tensorboard_log, tb_log_name, reset_num_timesteps
+        )
 
         # Create eval callback if needed
-        callback = self._init_callback(callback, eval_env, eval_freq, n_eval_episodes, log_path)
+        callback = self._init_callback(
+            callback, eval_env, eval_freq, n_eval_episodes, log_path
+        )
 
         return total_timesteps, callback
 
-    def _update_info_buffer(self, infos: List[Dict[str, Any]], dones: Optional[np.ndarray] = None) -> None:
+    def _update_info_buffer(
+        self, infos: List[Dict[str, Any]], dones: Optional[np.ndarray] = None
+    ) -> None:
         """
         Retrieve reward, episode length, episode success and update the buffer
         if using Monitor wrapper or a GoalEnv.
@@ -605,31 +639,50 @@ class BaseAlgorithm(ABC):
             file that can not be deserialized.
         :param kwargs: extra arguments to change the model when loading
         """
-        data, params, pytorch_variables = load_from_zip_file(path, device=device, custom_objects=custom_objects)
+        data, params, pytorch_variables = load_from_zip_file(
+            path, device=device, custom_objects=custom_objects
+        )
 
         # Remove stored device information and replace with ours
         if "policy_kwargs" in data:
             if "device" in data["policy_kwargs"]:
                 del data["policy_kwargs"]["device"]
 
-        if "policy_kwargs" in kwargs and kwargs["policy_kwargs"] != data["policy_kwargs"]:
+        if (
+            "policy_kwargs" in kwargs
+            and kwargs["policy_kwargs"] != data["policy_kwargs"]
+        ):
             raise ValueError(
                 f"The specified policy kwargs do not equal the stored policy kwargs."
                 f"Stored kwargs: {data['policy_kwargs']}, specified kwargs: {kwargs['policy_kwargs']}"
             )
 
         if "observation_space" not in data or "action_space" not in data:
-            raise KeyError("The observation_space and action_space were not given, can't verify new environments")
+            raise KeyError(
+                "The observation_space and action_space were not given, can't verify new environments"
+            )
 
         if env is not None:
             # Wrap first if needed
             env = cls._wrap_env(env, data["verbose"])
             # Check if given env is valid
-            check_for_correct_spaces(env, data["observation_space"], data["action_space"])
+            check_for_correct_spaces(
+                env, data["observation_space"], data["action_space"]
+            )
         else:
             # Use stored env, if one exists. If not, continue as is (can be used for predict)
             if "env" in data:
                 env = data["env"]
+
+        import rospy
+
+        if "robot_model" in data["policy_kwargs"]["features_extractor_kwargs"]:
+            if data["policy_kwargs"]["features_extractor_kwargs"][
+                "robot_model"
+            ] != rospy.get_param("model"):
+                data["policy_kwargs"]["features_extractor_kwargs"][
+                    "robot_model"
+                ] = rospy.get_param("model")
 
         # noinspection PyArgumentList
         model = cls(  # pytype: disable=not-instantiable,wrong-keyword-args
@@ -721,4 +774,6 @@ class BaseAlgorithm(ABC):
         # Build dict of state_dicts
         params_to_save = self.get_parameters()
 
-        save_to_zip_file(path, data=data, params=params_to_save, pytorch_variables=pytorch_variables)
+        save_to_zip_file(
+            path, data=data, params=params_to_save, pytorch_variables=pytorch_variables
+        )

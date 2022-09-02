@@ -630,13 +630,14 @@ class MarlEvalCallback(EventCallback):
         #     self._success_rate_buffer.append(success_counter / self.num_robots)
 
         # done_count = np.sum(np.asarray(locals_["done_count"].values()))
-        done_count = np.sum([count for count in locals_["done_count"].values()])
 
-        if done_count == self.num_robots:
-            for robot in self.robots:
+        for robot in self.robots:
+            if locals_["done_count"][robot]:
                 self._success_rate_buffer[robot].append(
                     locals_["success_count"][robot] / len(self.agent_names[robot])
                 )
+            else:
+                self._success_rate_buffer[robot].append(0)
 
     def _on_step(self) -> bool:
 
@@ -698,7 +699,7 @@ class MarlEvalCallback(EventCallback):
                 self.wandb_logger.log(
                     "eval/mean_rewards",
                     mean_rewards,
-                    step=(self.n_calls / self.eval_freq),
+                    step=self.n_calls,
                 )
 
             ### Calculate standard deviation of rewards
@@ -721,7 +722,7 @@ class MarlEvalCallback(EventCallback):
                 self.wandb_logger.log_single(
                     "eval/mean_ep_length",
                     mean_ep_length,
-                    step=(self.n_calls / self.eval_freq),
+                    step=self.n_calls,
                 )
 
             for robot in self.robots:
@@ -748,7 +749,12 @@ class MarlEvalCallback(EventCallback):
                 if self.verbose > 0:
                     print("\n---- Success rates ----\n")
                 for robot in self.robots:
-                    success_rate = np.mean(self._success_rate_buffer[robot])
+                    success_rate = (
+                        np.mean(self._success_rate_buffer[robot])
+                        if self._success_rate_buffer[robot]
+                        else 0
+                    )
+
                     if self.verbose > 0:
                         print(f"{robot}:\t{100 * success_rate:.2f}%")
 
@@ -765,7 +771,7 @@ class MarlEvalCallback(EventCallback):
                     self.wandb_logger.log(
                         "eval/success_rate",
                         sr_dict,
-                        step=(self.n_calls / self.eval_freq),
+                        step=self.n_calls,
                     )
 
             if self.verbose > 0:
@@ -782,6 +788,13 @@ class MarlEvalCallback(EventCallback):
                         robot
                     ] is not None and not rospy.get_param("debug_mode", False):
                         model = self.robots[robot]["model"]
+                        if self.verbose > 0:
+                            print(
+                                "Saving new best model to {}".format(
+                                    self.best_model_save_paths[robot]
+                                )
+                            )
+                            print("")
                         model.save(
                             os.path.join(
                                 self.best_model_save_paths[robot], "best_model"

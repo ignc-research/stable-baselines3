@@ -161,6 +161,9 @@ class PPO(OnPolicyAlgorithm):
 
             self.clip_range_vf = get_schedule_fn(self.clip_range_vf)
 
+    def set_wandb_logger(self, wandb_logger):
+        self.wandb_logger = wandb_logger
+
     def train(self, agent) -> None:
         """
         Update policy using the currently gathered rollout buffer.
@@ -292,41 +295,84 @@ class PPO(OnPolicyAlgorithm):
 
         logger.dump(step=self.num_timesteps)
 
-        if self.wandb_logger is not None:
-            step = self.num_timesteps / self.n_epochs
-            self.wandb_logger.log(
-                "train/entropy_loss", {agent: np.mean(entropy_losses)}, step=step
+        if hasattr(self.policy, "log_std"):
+            log_std = th.exp(self.policy.log_std).mean().item()
+        else:
+            log_std = None
+
+        if self.clip_range_vf is None:
+            clip_range_vf = None
+
+        if self.wandb_logger:
+            step = self.num_timesteps
+
+            wandb_log = {}
+            wandb_log["train/entropy_loss/{}".format(agent)] = np.mean(entropy_losses)
+            wandb_log["train/policy_gradient_loss/{}".format(agent)] = np.mean(
+                pg_losses
             )
-            self.wandb_logger.log(
-                "train/policy_gradient_loss", {agent: np.mean(pg_losses)}, step=step
-            )
-            self.wandb_logger.log(
-                "train/value_loss", {agent: np.mean(value_losses)}, step=step
-            )
-            self.wandb_logger.log(
-                "train/approx_kl", {agent: np.mean(approx_kl_divs)}, step=step
-            )
-            self.wandb_logger.log(
-                "train/clip_fraction", {agent: np.mean(clip_fractions)}, step=step
-            )
-            self.wandb_logger.log("loss", {agent: loss.item()}, step=step)
-            self.wandb_logger.log(
-                "train/explained_variance", {agent: explained_var}, step=step
-            )
+            wandb_log["train/value_loss/{}".format(agent)] = np.mean(value_losses)
+            wandb_log["train/approx_kl/{}".format(agent)] = np.mean(approx_kl_divs)
+            wandb_log["train/clip_fraction/{}".format(agent)] = np.mean(clip_fractions)
+            wandb_log["train/loss/{}".format(agent)] = loss.item()
+            wandb_log["train/explained_variance/{}".format(agent)] = explained_var
             if hasattr(self.policy, "log_std"):
-                self.wandb_logger.log(
-                    "train/std",
-                    {agent: th.exp(self.policy.log_std).mean().item()},
-                    step=step,
-                )
-            self.wandb_logger.log(
-                "train/n_updates", {agent: self._n_updates}, step=step
-            )
-            self.wandb_logger.log("train/clip_range", {agent: clip_range}, step=step)
+                wandb_log["train/std/{}".format(agent)] = log_std
+            wandb_log["train/n_updates/{}".format(agent)] = self._n_updates
+            wandb_log["train/clip_range/{}".format(agent)] = clip_range
             if self.clip_range_vf is not None:
-                self.wandb_logger.log(
-                    "train/clip_range_vf", {agent: clip_range_vf}, step=step
-                )
+                wandb_log["train/clip_range_vf/{}".format(agent)] = clip_range_vf
+
+            self.wandb_logger.log_batch(wandb_log, step)
+
+            # self.wandb_logger.log(
+            #     "train/entropy_loss", {agent: np.mean(entropy_losses)}, step=step
+            # )
+            # self.wandb_logger.log(
+            #     "train/policy_gradient_loss", {agent: np.mean(pg_losses)}, step=step
+            # )
+            # self.wandb_logger.log(
+            #     "train/value_loss", {agent: np.mean(value_losses)}, step=step
+            # )
+            # self.wandb_logger.log(
+            #     "train/approx_kl", {agent: np.mean(approx_kl_divs)}, step=step
+            # )
+            # self.wandb_logger.log(
+            #     "train/clip_fraction", {agent: np.mean(clip_fractions)}, step=step
+            # )
+            # self.wandb_logger.log("train/loss", {agent: loss.item()}, step=step)
+            # self.wandb_logger.log(
+            #     "train/explained_variance", {agent: explained_var}, step=step
+            # )
+            # if hasattr(self.policy, "log_std"):
+            #     self.wandb_logger.log(
+            #         "train/std",
+            #         {agent: log_std},
+            #         step=step,
+            #     )
+            # self.wandb_logger.log(
+            #     "train/n_updates", {agent: self._n_updates}, step=step
+            # )
+            # self.wandb_logger.log("train/clip_range", {agent: clip_range}, step=step)
+            # if self.clip_range_vf is not None:
+            #     self.wandb_logger.log(
+            #         "train/clip_range_vf", {agent: clip_range_vf}, step=step
+            #     )
+
+        return (
+            self.num_timesteps,
+            entropy_losses,
+            pg_losses,
+            value_losses,
+            approx_kl_divs,
+            clip_fractions,
+            loss.item(),
+            explained_var,
+            log_std,
+            self._n_updates,
+            clip_range,
+            clip_range_vf,
+        )
 
     def learn(
         self,
@@ -358,3 +404,90 @@ class PPO(OnPolicyAlgorithm):
         if self.env is not None:
             self.n_envs = self.env.num_envs
             self.rollout_buffer.n_envs = self.n_envs
+
+
+# class Wandb_PPO_Wrapper(object):
+#     def __init__(self, ppo: PPO, wandb_logger) -> None:
+#         self.ppo = ppo
+#         self.wandb_logger = wandb_logger
+
+#     def set_wandb_logger(self, wandb_logger):
+#         self.wandb_logger = wandb_logger
+
+#     def train(self, agent) -> None:
+#         (
+#             num_timesteps,
+#             entropy_losses,
+#             pg_losses,
+#             value_losses,
+#             approx_kl_divs,
+#             clip_fractions,
+#             loss,
+#             explained_var,
+#             log_std,
+#             n_updates,
+#             clip_range,
+#             clip_range_vf,
+#         ) = self.ppo.train(agent)
+
+#         if self.wandb_logger is not None:
+#             step = num_timesteps
+#             self.wandb_logger.log(
+#                 "train/entropy_loss", {agent: np.mean(entropy_losses)}, step=step
+#             )
+#             self.wandb_logger.log(
+#                 "train/policy_gradient_loss", {agent: np.mean(pg_losses)}, step=step
+#             )
+#             self.wandb_logger.log(
+#                 "train/value_loss", {agent: np.mean(value_losses)}, step=step
+#             )
+#             self.wandb_logger.log(
+#                 "train/approx_kl", {agent: np.mean(approx_kl_divs)}, step=step
+#             )
+#             self.wandb_logger.log(
+#                 "train/clip_fraction", {agent: np.mean(clip_fractions)}, step=step
+#             )
+#             self.wandb_logger.log("train/loss", {agent: loss}, step=step)
+#             self.wandb_logger.log(
+#                 "train/explained_variance", {agent: explained_var}, step=step
+#             )
+#             if log_std:
+#                 self.wandb_logger.log(
+#                     "train/std",
+#                     {agent: log_std},
+#                     step=step,
+#                 )
+#             self.wandb_logger.log("train/n_updates", {agent: n_updates}, step=step)
+#             self.wandb_logger.log("train/clip_range", {agent: clip_range}, step=step)
+#             if clip_range_vf:
+#                 self.wandb_logger.log(
+#                     "train/clip_range_vf", {agent: clip_range_vf}, step=step
+#                 )
+
+#     def learn(
+#         self,
+#         total_timesteps: int,
+#         callback: MaybeCallback = None,
+#         log_interval: int = 1,
+#         eval_env: Optional[GymEnv] = None,
+#         eval_freq: int = -1,
+#         n_eval_episodes: int = 5,
+#         tb_log_name: str = "PPO",
+#         eval_log_path: Optional[str] = None,
+#         reset_num_timesteps: bool = True,
+#     ) -> "PPO":
+#         warnings.warn("WandB logging will not be considered with this method call.")
+#         self.ppo.learn(
+#             total_timesteps,
+#             callback,
+#             log_interval,
+#             eval_env,
+#             eval_freq,
+#             n_eval_episodes,
+#             tb_log_name,
+#             eval_log_path,
+#             reset_num_timesteps,
+#         )
+
+#     def update_n_envs(self):
+#         self.ppo.update_n_envs()
