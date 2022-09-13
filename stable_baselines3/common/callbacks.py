@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import warnings
 from abc import ABC, abstractmethod
@@ -639,6 +640,18 @@ class MarlEvalCallback(EventCallback):
             else:
                 self._success_rate_buffer[robot].append(0)
 
+            for i in range(3):
+                self._done_reason_buffer[robot][str(i)] += (
+                    locals_["done_reason_count"][robot][i]
+                    / locals_["done_reason_count"][robot][
+                        3
+                    ]  # normalize over number of done reason entries
+                )
+            # No done reason count
+            self._done_reason_buffer[robot]["No done reason"] += locals_[
+                "done_reason_count"
+            ][robot][4]
+
     def _on_step(self) -> bool:
 
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
@@ -648,6 +661,10 @@ class MarlEvalCallback(EventCallback):
 
             # Reset success rate buffer
             self._success_rate_buffer = {robot: [] for robot in self.robots}
+            self._done_reason_buffer = {
+                robot: {"0": 0, "1": 0, "2": 0, "No done reason": 0}
+                for robot in self.robots
+            }
 
             episode_rewards_dict, episode_lengths = self.evaluate_policy(
                 self.robots,
@@ -755,8 +772,16 @@ class MarlEvalCallback(EventCallback):
                         else 0
                     )
 
+                    done_reasons = self._done_reason_buffer[robot]
+
                     if self.verbose > 0:
                         print(f"{robot}:\t{100 * success_rate:.2f}%")
+                        for reason, count in done_reasons.items():
+                            count /= self.n_eval_episodes
+                            if reason == "No done reason":
+                                print(f"\t{reason} per episode: {count:.2f}")
+                            else:
+                                print(f"\t{reason}: {100 * count:.2f}%")
 
                     if self.logger is not None:
                         self.logger.record(f"eval/{robot}/success_rate", success_rate)
@@ -789,9 +814,11 @@ class MarlEvalCallback(EventCallback):
                     ] is not None and not rospy.get_param("debug_mode", False):
                         model = self.robots[robot]["model"]
                         if self.verbose > 0:
+                            now = datetime.now()
+                            dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
                             print(
-                                "Saving new best model to {}".format(
-                                    self.best_model_save_paths[robot]
+                                "[{}] Saving new best model to {}".format(
+                                    dt_string, self.best_model_save_paths[robot]
                                 )
                             )
                             print("")
