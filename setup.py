@@ -70,7 +70,11 @@ model = PPO('MlpPolicy', 'CartPole-v1').learn(10000)
 
 setup(
     name="stable_baselines3",
-    packages=[package for package in find_packages() if package.startswith("stable_baselines3")],
+    packages=[
+        package
+        for package in find_packages()
+        if package.startswith("stable_baselines3")
+    ],
     package_data={"stable_baselines3": ["py.typed", "version.txt"]},
     install_requires=[
         "gym>=0.17",
@@ -82,6 +86,7 @@ setup(
         "pandas",
         # Plotting learning curves
         "matplotlib",
+        "wandb",
     ],
     extras_require={
         "tests": [

@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional, Type, Union
 
 import numpy as np
 import torch as th
+import wandb
 from gym import spaces
 from torch.nn import functional as F
 
@@ -84,6 +85,7 @@ class PPO(OnPolicyAlgorithm):
         sde_sample_freq: int = -1,
         target_kl: Optional[float] = None,
         tensorboard_log: Optional[str] = None,
+        use_wandb: bool = False,
         create_eval_env: bool = False,
         policy_kwargs: Optional[Dict[str, Any]] = None,
         verbose: int = 0,
@@ -118,6 +120,34 @@ class PPO(OnPolicyAlgorithm):
                 spaces.MultiBinary,
             ),
         )
+
+        if use_wandb:
+            logger_config = {
+                "learning_rate": learning_rate,
+                "n_steps": n_steps,
+                "batch_size": batch_size,
+                "n_epochs": n_epochs,
+                "gamma": gamma,
+                "gae_lambda": gae_lambda,
+                "ent_coef": ent_coef,
+                "vf_coef": vf_coef,
+                "max_grad_norm": max_grad_norm,
+                "use_sde": use_sde,
+                "sde_sample_freq": sde_sample_freq,
+                "clip_range": clip_range,
+                "clip_range_vf": clip_range_vf,
+                "target_kl": target_kl,
+            }
+
+            wandb.init(
+                project="Arena-RL",
+                entity=None,
+                sync_tensorboard=True,
+                monitor_gym=True,
+                save_code=True,
+                config=logger_config,
+            )
+
         if self.env is not None:
             # Check that `n_steps * n_envs > 1` to avoid NaN
             # when doing advantage normalization
@@ -152,7 +182,10 @@ class PPO(OnPolicyAlgorithm):
         self.clip_range = get_schedule_fn(self.clip_range)
         if self.clip_range_vf is not None:
             if isinstance(self.clip_range_vf, (float, int)):
-                assert self.clip_range_vf > 0, "`clip_range_vf` must be positive, " "pass `None` to deactivate vf clipping"
+                assert self.clip_range_vf > 0, (
+                    "`clip_range_vf` must be positive, "
+                    "pass `None` to deactivate vf clipping"
+                )
 
             self.clip_range_vf = get_schedule_fn(self.clip_range_vf)
 
@@ -188,18 +221,24 @@ class PPO(OnPolicyAlgorithm):
                 if self.use_sde:
                     self.policy.reset_noise(self.batch_size)
 
-                values, log_prob, entropy = self.policy.evaluate_actions(rollout_data.observations, actions)
+                values, log_prob, entropy = self.policy.evaluate_actions(
+                    rollout_data.observations, actions
+                )
                 values = values.flatten()
                 # Normalize advantage
                 advantages = rollout_data.advantages
-                advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+                advantages = (advantages - advantages.mean()) / (
+                    advantages.std() + 1e-8
+                )
 
                 # ratio between old and new policy, should be one at the first iteration
                 ratio = th.exp(log_prob - rollout_data.old_log_prob)
 
                 # clipped surrogate loss
                 policy_loss_1 = advantages * ratio
-                policy_loss_2 = advantages * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
+                policy_loss_2 = advantages * th.clamp(
+                    ratio, 1 - clip_range, 1 + clip_range
+                )
                 policy_loss = -th.min(policy_loss_1, policy_loss_2).mean()
 
                 # Logging
@@ -229,24 +268,39 @@ class PPO(OnPolicyAlgorithm):
 
                 entropy_losses.append(entropy_loss.item())
 
-                loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+                loss = (
+                    policy_loss
+                    + self.ent_coef * entropy_loss
+                    + self.vf_coef * value_loss
+                )
 
                 # Optimization step
                 self.policy.optimizer.zero_grad()
                 loss.backward()
                 # Clip grad norm
-                th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                th.nn.utils.clip_grad_norm_(
+                    self.policy.parameters(), self.max_grad_norm
+                )
                 self.policy.optimizer.step()
-                approx_kl_divs.append(th.mean(rollout_data.old_log_prob - log_prob).detach().cpu().numpy())
+                approx_kl_divs.append(
+                    th.mean(rollout_data.old_log_prob - log_prob).detach().cpu().numpy()
+                )
 
             all_kl_divs.append(np.mean(approx_kl_divs))
 
-            if self.target_kl is not None and np.mean(approx_kl_divs) > 1.5 * self.target_kl:
-                print(f"Early stopping at step {epoch} due to reaching max kl: {np.mean(approx_kl_divs):.2f}")
+            if (
+                self.target_kl is not None
+                and np.mean(approx_kl_divs) > 1.5 * self.target_kl
+            ):
+                print(
+                    f"Early stopping at step {epoch} due to reaching max kl: {np.mean(approx_kl_divs):.2f}"
+                )
                 break
 
         self._n_updates += self.n_epochs
-        explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
+        explained_var = explained_variance(
+            self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten()
+        )
 
         # Logs
         logger.record("train/entropy_loss", np.mean(entropy_losses))
@@ -290,9 +344,7 @@ class PPO(OnPolicyAlgorithm):
         )
 
     def update_n_envs(self):
-        assert (
-            self.env is not None
-        ), f"No environment given"
+        assert self.env is not None, f"No environment given"
         if self.env is not None:
             self.n_envs = self.env.num_envs
             self.rollout_buffer.n_envs = self.n_envs
