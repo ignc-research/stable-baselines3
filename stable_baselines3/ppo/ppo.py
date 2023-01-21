@@ -3,7 +3,6 @@ from typing import Any, Dict, Optional, Type, Union
 
 import numpy as np
 import torch as th
-import wandb
 from gym import spaces
 from torch.nn import functional as F
 
@@ -93,6 +92,34 @@ class PPO(OnPolicyAlgorithm):
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
     ):
+        if use_wandb:
+            import wandb
+
+            logger_config = {
+                "learning_rate": learning_rate,
+                "n_steps": n_steps,
+                "batch_size": batch_size,
+                "n_epochs": n_epochs,
+                "gamma": gamma,
+                "gae_lambda": gae_lambda,
+                "ent_coef": ent_coef,
+                "vf_coef": vf_coef,
+                "max_grad_norm": max_grad_norm,
+                "use_sde": use_sde,
+                "sde_sample_freq": sde_sample_freq,
+                "clip_range": clip_range,
+                "clip_range_vf": clip_range_vf,
+                "target_kl": target_kl,
+            }
+
+            wandb.init(
+                project="Arena-RL",
+                entity=None,
+                sync_tensorboard=True,
+                monitor_gym=True,
+                save_code=True,
+                config=logger_config,
+            )
 
         super(PPO, self).__init__(
             policy,
@@ -120,33 +147,6 @@ class PPO(OnPolicyAlgorithm):
                 spaces.MultiBinary,
             ),
         )
-
-        if use_wandb:
-            logger_config = {
-                "learning_rate": learning_rate,
-                "n_steps": n_steps,
-                "batch_size": batch_size,
-                "n_epochs": n_epochs,
-                "gamma": gamma,
-                "gae_lambda": gae_lambda,
-                "ent_coef": ent_coef,
-                "vf_coef": vf_coef,
-                "max_grad_norm": max_grad_norm,
-                "use_sde": use_sde,
-                "sde_sample_freq": sde_sample_freq,
-                "clip_range": clip_range,
-                "clip_range_vf": clip_range_vf,
-                "target_kl": target_kl,
-            }
-
-            wandb.init(
-                project="Arena-RL",
-                entity=None,
-                sync_tensorboard=True,
-                monitor_gym=True,
-                save_code=True,
-                config=logger_config,
-            )
 
         if self.env is not None:
             # Check that `n_steps * n_envs > 1` to avoid NaN
