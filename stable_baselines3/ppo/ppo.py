@@ -84,7 +84,6 @@ class PPO(OnPolicyAlgorithm):
         sde_sample_freq: int = -1,
         target_kl: Optional[float] = None,
         tensorboard_log: Optional[str] = None,
-        use_wandb: bool = False,
         create_eval_env: bool = False,
         policy_kwargs: Optional[Dict[str, Any]] = None,
         verbose: int = 0,
@@ -92,35 +91,6 @@ class PPO(OnPolicyAlgorithm):
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
     ):
-        if use_wandb:
-            import wandb
-
-            logger_config = {
-                "learning_rate": learning_rate,
-                "n_steps": n_steps,
-                "batch_size": batch_size,
-                "n_epochs": n_epochs,
-                "gamma": gamma,
-                "gae_lambda": gae_lambda,
-                "ent_coef": ent_coef,
-                "vf_coef": vf_coef,
-                "max_grad_norm": max_grad_norm,
-                "use_sde": use_sde,
-                "sde_sample_freq": sde_sample_freq,
-                "clip_range": clip_range,
-                "clip_range_vf": clip_range_vf,
-                "target_kl": target_kl,
-            }
-
-            wandb.init(
-                project="Arena-RL",
-                entity=None,
-                sync_tensorboard=True,
-                monitor_gym=True,
-                save_code=True,
-                config=logger_config,
-            )
-
         super(PPO, self).__init__(
             policy,
             env,
